@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react'
+import { FiZoomIn, FiZoomOut, FiRotateCcw, FiRotateCw } from 'react-icons/fi'
 
 export default function Toolbar({
     glbUrl,
@@ -39,7 +40,7 @@ export default function Toolbar({
                             className="ml-2 bg-red-600 px-3 rounded"
                             onClick={onRemoveGLB}
                         >
-                            Delete GLB
+                            🗑
                         </button>
                     )}
                 </div>
@@ -160,6 +161,47 @@ export default function Toolbar({
                 >
                     Clear Decals
                 </button>
+            </div>
+
+            <div className="mt-4">
+                <h4 className="text-xs text-gray-300 mb-2">Model Controls</h4>
+
+                <div className="flex gap-2">
+                    <button
+                        title="Zoom In"
+                        className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded hover:bg-gray-700"
+                        onClick={() => window.dispatchEvent(new CustomEvent('modelCommand', { detail: { action: 'zoom', delta: 1.12 } }))}
+                    >
+                        <img src='/zoom-in.svg' width={25} />
+
+                    </button>
+
+                    <button
+                        title="Zoom Out"
+                        className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded hover:bg-gray-700"
+                        onClick={() => window.dispatchEvent(new CustomEvent('modelCommand', { detail: { action: 'zoom', delta: 1 / 1.12 } }))}
+                    >
+                        <img src='/zoom-out.svg' width={25} />
+
+                    </button>
+
+                    <button
+                        title="Rotate Clockwise"
+                        className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded hover:bg-gray-700"
+                        onClick={() => window.dispatchEvent(new CustomEvent('modelCommand', { detail: { action: 'rotate', axis: 'y', deg: -15 } }))}
+                    >
+                        <img src='/left.svg' width={25} />
+
+                    </button>
+
+                    <button
+                        title="Rotate Anti-clockwise"
+                        className="flex items-center gap-1 px-3 py-2 bg-gray-800 rounded hover:bg-gray-700"
+                        onClick={() => window.dispatchEvent(new CustomEvent('modelCommand', { detail: { action: 'rotate', axis: 'y', deg: 15 } }))}
+                    >
+                        <img src='/right.svg' width={25} />
+                    </button>
+                </div>
             </div>
         </div>
     )
