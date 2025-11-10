@@ -132,7 +132,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
 
         if (asset.type === 'text') {
             const t = opts?.text ?? texts[asset.index] ?? 'Text'
-            const color = opts?.color ?? '#ffffff'
+            const color = opts?.color ?? '#000000'
             const fontChoice = opts?.font ?? 'sans-serif'
             // adaptive font size
             const baseSize = Math.max(32, Math.min(96, Math.floor(280 / Math.max(1, t.length))))

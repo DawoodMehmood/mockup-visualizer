@@ -3,6 +3,7 @@ import React, { Suspense } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Environment, Html } from '@react-three/drei'
 import ModelWithDecals from './ModelWithDecals'
+import { FiLoader } from 'react-icons/fi'
 
 export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor = '#0f172a' }: any) {
     return (
@@ -11,7 +12,9 @@ export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor =
             <color attach="background" args={[bgColor]} />
             <ambientLight intensity={0.6} />
             <directionalLight intensity={0.8} position={[5, 10, 7]} />
-            <Suspense fallback={<Html center>Loading model…</Html>}>
+            <Suspense fallback={<Html center>
+                <FiLoader size={30} className="animate-spin text-white" />
+            </Html>}>
                 {glbUrl && (
                     <ModelWithDecals
                         glbUrl={glbUrl}
