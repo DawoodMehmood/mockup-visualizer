@@ -1,8 +1,8 @@
 // src/components/ModelWithDecals.tsx
-import React, { useRef, useState, useEffect, useMemo } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useGLTF, Html } from '@react-three/drei'
+import { useGLTF } from '@react-three/drei'
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
 
@@ -502,7 +502,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
             const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
 
             // create new decal geometry at newPoint keeping scale & rotation
-            const { mesh: newMesh } = createDecalMesh(hit.object, newPoint, normal, rec.canvas, rec.size)
+            const { mesh: newMesh } = createDecalMesh(hit.object, newPoint, normal, rec.canvas, rec.sizeForDecal ?? 0.5)
             newMesh.scale.copy(rec.mesh.scale)
             newMesh.rotation.copy(rec.mesh.rotation)
             // add and remove old mesh
@@ -584,36 +584,50 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
     useEffect(() => {
         const handler = (e: any) => {
             if (e.type === 'exportPNG') {
-                if (!gl || !scene || !camera) return
+                if (!gl || !scene || !camera) return;
 
                 // Save original state
-                const prevSize = gl.getSize(new THREE.Vector2())
-                const prevPixelRatio = gl.getPixelRatio()
+                const prevSize = gl.getSize(new THREE.Vector2());
+                const prevPixelRatio = gl.getPixelRatio();
+                const prevBackground = scene.background ? scene.background.clone() : null;
 
-                // Target size: maintain camera aspect to avoid stretching
-                const dpr = Math.min(window.devicePixelRatio, 2)
-                const w = Math.floor(window.innerHeight * camera.aspect * dpr)
-                const h = Math.floor(window.innerHeight * dpr)
-                gl.setPixelRatio(dpr)
-                gl.setSize(w, h, false)
+                try {
+                    // DPR and target size (preserve aspect)
+                    const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-                // Render scene to get transparent output
-                scene.background = null
-                gl.render(scene, camera)
-                scene.background = new THREE.Color(bgColor) // restore after export
+                    // Try to use camera.aspect if it's a PerspectiveCamera; otherwise fall back to renderer size
+                    const isPersp = (camera as any).isPerspectiveCamera || (camera as THREE.PerspectiveCamera).isPerspectiveCamera;
+                    const aspect = isPersp
+                        ? (camera as THREE.PerspectiveCamera).aspect
+                        : (prevSize.x && prevSize.y) ? (prevSize.x / prevSize.y) : (window.innerWidth / window.innerHeight);
 
-                // Export
-                const url = gl.domElement.toDataURL('image/png')
-                const a = document.createElement('a')
-                a.href = url
-                a.download = 'mockup.png'
-                a.click()
-                a.remove()
+                    const h = Math.floor(window.innerHeight * dpr);
+                    const w = Math.floor(h * aspect);
 
-                // Restore original
-                gl.setSize(prevSize.x, prevSize.y, false)
-                gl.setPixelRatio(prevPixelRatio)
-            } else if (e.type === 'exportGLB') {
+                    gl.setPixelRatio(dpr);
+                    gl.setSize(w, h, false);
+
+                    // Make background transparent for export
+                    scene.background = null;
+                    gl.render(scene, camera);
+
+                    const url = gl.domElement.toDataURL('image/png');
+
+                    // trigger download
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'mockup.png';
+                    a.click();
+                    a.remove();
+                } finally {
+                    // Restore original renderer + scene background
+                    gl.setSize(prevSize.x, prevSize.y, false);
+                    gl.setPixelRatio(prevPixelRatio);
+                    if (prevBackground) scene.background = prevBackground;
+                    else scene.background = new THREE.Color(bgColor); // fallback if you want to keep bgColor variable
+                }
+            }
+            else if (e.type === 'exportGLB') {
                 // --- GLB Export ---
                 const exporter = new GLTFExporter()
 
@@ -670,20 +684,16 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
 
 
     // UI anchor for selected decal (compute world position each frame)
-    const [uiPos, setUiPos] = useState<THREE.Vector3 | null>(null)
     useFrame(() => {
         if (!selectedId) {
-            setUiPos(null)
             return
         }
         const rec = decals.find(d => d.id === selectedId)
         if (!rec) {
-            setUiPos(null)
             return
         }
         const p = new THREE.Vector3()
         rec.mesh.getWorldPosition(p)
-        setUiPos(p)
     })
 
     // Render container group once and rely on modelRef & decalsGroupRef being children of it.

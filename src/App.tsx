@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import Viewer from './components/Viewer'
 import MaterialSwatches from './components/MaterialSwatches'
 import DecalList from './components/DecalList'

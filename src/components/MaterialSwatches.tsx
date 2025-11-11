@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as THREE from 'three'
 import { collectMaterials, sampleMaterialColor, type MaterialGroup } from '../utils/materialUtils'
 
