@@ -4,24 +4,34 @@ import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useGLTF, Html } from '@react-three/drei'
 import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js'
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
 
 type AssetRef = { type: 'logo' | 'text'; index: number }
 type DecalRec = {
     id: string
     mesh: THREE.Mesh
-    size: number
+    // size stored as decal width (world units). We won't use mesh.scale for visual size.
+    sizeForDecal: number
     canvas: HTMLCanvasElement
     meta: AssetRef
     text?: string
     font?: string
     color?: string
+
+    // important surface attachment info:
+    hitObject?: THREE.Object3D   // the mesh we projected onto
+    position?: THREE.Vector3    // world-space decal center point
+    normal?: THREE.Vector3      // world-space normal at hit point
+    rotDeg?: number             // in-plane rotation (degrees) around normal
+    fontSize?: number           // for text canvases (px)
 }
 
-export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }: {
+export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, bgColor }: {
     glbUrl: string | null
     logos: File[]
     texts: string[]
     assetSelection: AssetRef | null
+    bgColor: string
 }) {
     const containerRef = useRef<THREE.Group | null>(null) // top-level container that will be attached once
     const modelRef = useRef<THREE.Group | null>(null) // group for the model node
@@ -122,7 +132,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
 
 
     // Helper: build canvas for an asset (text or logo)
-    const makeCanvasForAsset = (asset: AssetRef, opts?: { text?: string; font?: string; color?: string }) => {
+    const makeCanvasForAsset = (asset: AssetRef, opts?: { text?: string; font?: string; color?: string; fontSize?: number }) => {
         const SIZE = 512
         const canvas = document.createElement('canvas')
         canvas.width = SIZE
@@ -134,12 +144,12 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
             const t = opts?.text ?? texts[asset.index] ?? 'Text'
             const color = opts?.color ?? '#000000'
             const fontChoice = opts?.font ?? 'sans-serif'
-            // adaptive font size
-            const baseSize = Math.max(32, Math.min(96, Math.floor(280 / Math.max(1, t.length))))
+            // use fontSize from opts if provided, otherwise fallback to adaptive
+            const fontSize = opts?.fontSize ?? Math.max(32, Math.min(96, Math.floor(280 / Math.max(1, t.length))))
             ctx.fillStyle = color
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
-            ctx.font = `bold ${baseSize}px ${fontChoice}`
+            ctx.font = `bold ${fontSize}px ${fontChoice}`
             ctx.fillText(t, SIZE / 2, SIZE / 2)
         } else {
             const img = logoImgsRef.current[asset.index]
@@ -149,12 +159,9 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
                 const h = img.height * scale
                 ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h)
                 if (opts?.color) {
-                    ctx.globalCompositeOperation = 'multiply'
-                    ctx.fillStyle = opts.color
-                    ctx.fillRect(0, 0, SIZE, SIZE)
-                    ctx.globalCompositeOperation = 'destination-atop'
-                    ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h)
-                    ctx.globalCompositeOperation = 'source-over'
+                    ctx.fillStyle = opts.color;
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.fillRect(0, 0, SIZE, SIZE);
                 }
             } else {
                 ctx.fillStyle = '#cccccc'
@@ -165,11 +172,39 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
     }
 
     // Helper: create decal mesh and return mesh + material + texture
-    const createDecalMesh = (hitObject: THREE.Object3D, point: THREE.Vector3, normal: THREE.Vector3, canvas: HTMLCanvasElement, size = 0.5) => {
+    // Helper: create decal mesh — accepts rotationDeg (deg around normal) and width (world units)
+    const createDecalMesh = (
+        hitObject: THREE.Object3D,
+        point: THREE.Vector3,
+        normal: THREE.Vector3,
+        canvas: HTMLCanvasElement,
+        width = 0.5,
+        rotationDeg = 0
+    ) => {
+        // base orientation: rotate up (0,0,1) to the surface normal
         const up = new THREE.Vector3(0, 0, 1)
-        const q = new THREE.Quaternion().setFromUnitVectors(up, normal)
-        const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ')
-        const decalGeo = new DecalGeometry(hitObject as any, point, euler, new THREE.Vector3(size, size, size))
+        const q = new THREE.Quaternion().setFromUnitVectors(up, normal.clone().normalize())
+
+        // apply additional rotation around the normal (in-plane)
+        // create a quaternion that rotates around the normal by rotationDeg
+        const rotRad = (rotationDeg * Math.PI) / 180
+        const qAroundNormal = new THREE.Quaternion().setFromAxisAngle(normal.clone().normalize(), rotRad)
+
+        // combined rotation: first align to normal, then rotate in-plane
+        const finalQuat = q.clone().multiply(qAroundNormal)
+        const euler = new THREE.Euler().setFromQuaternion(finalQuat, 'XYZ')
+
+        // depth small; keep depth proportional to width (thin)
+        const depth = Math.max(0.01, width * 0.15)
+        const OFFSET = 0.001; // 1mm offset to prevent clipping
+        const placementPoint = point.clone().add(normal.clone().multiplyScalar(OFFSET));
+
+        const decalGeo = new DecalGeometry(
+            hitObject as any,
+            placementPoint,
+            euler,
+            new THREE.Vector3(width, width, depth)
+        );
 
         const tex = new THREE.CanvasTexture(canvas)
             ; (tex as any).encoding = (THREE as any).sRGBEncoding ?? (THREE as any).SRGBColorSpace
@@ -190,6 +225,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
         return { mesh, mat, tex, euler }
     }
 
+
     // Place a decal on model when pointer down (one-time placement). Raycast against the actual model node.
     const onPointerDown = (e: any) => {
         e.stopPropagation()
@@ -208,23 +244,40 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
 
         const canvas = makeCanvasForAsset(assetSelection)
         const size = 0.5
-        const { mesh } = createDecalMesh(hit.object, point, normal, canvas, size)
+        const mainMesh = modelRef.current?.children[0]; // might be a Group
 
-        // add decal into decalsGroup (so model transforms don't affect decals)
+        // DecalGeometry wants a mesh
+        // if the model node is a Group, take the first mesh or flatten the children
+        const meshes: THREE.Mesh[] = [];
+        mainMesh!.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh);
+        });
+
+        // pick the first mesh, or consider applying decal to all meshes
+        const targetMesh = meshes[0]; // simple fix: use first mesh
+
+        const { mesh } = createDecalMesh(targetMesh, point, normal, canvas, size)
+
+        // after creating mesh and adding to decal group:
         decalsGroupRef.current!.add(mesh)
 
         const id = THREE.MathUtils.generateUUID()
         const rec: DecalRec = {
             id,
             mesh,
-            size,
+            sizeForDecal: size,            // width in world units
             canvas,
             meta: assetSelection,
             text: assetSelection.type === 'text' ? texts[assetSelection.index] : undefined,
             font: undefined,
             color: undefined,
+            // store hit info for future re-creation
+            hitObject: hit.object,
+            position: point.clone(),
+            normal: normal.clone(),
+            rotDeg: 0,
+            fontSize: assetSelection.type === 'text' ? Math.max(32, Math.min(96, Math.floor(280 / Math.max(1, (texts[assetSelection.index] || '').length)))) : undefined,
         }
-
         setDecals(prev => [...prev, rec])
         setSelectedId(id)
 
@@ -294,7 +347,12 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
                 case 'updateFont': {
                     if (rec.meta.type !== 'text') break
                     rec.font = data.font
-                    const c2 = makeCanvasForAsset(rec.meta, { text: rec.text, font: rec.font, color: rec.color })
+                    const c2 = makeCanvasForAsset(rec.meta, {
+                        text: rec.text,
+                        font: rec.font,
+                        fontSize: rec.fontSize,   // important: pass current size
+                        color: rec.color
+                    })
                         ; (rec.mesh.material as any).map = new THREE.CanvasTexture(c2)
                         ; ((rec.mesh.material as any).map as any).needsUpdate = true
                     rec.canvas = c2
@@ -310,6 +368,89 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
                     window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id, color: rec.color } }))
                     break
                 }
+                case 'setSize': { // used for logos (size in world units)
+                    const newSize = Number(data?.size ?? rec.sizeForDecal ?? 0.5)
+                    // recreate decal geometry at saved hit point
+                    const hitObj = rec.hitObject ?? rec.mesh // fallback
+                    const pos = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
+                    const normal = rec.normal ?? new THREE.Vector3(0, 0, 1)
+
+                    // keep same canvas texture (we may need to recreate canvas for text separately)
+                    // remove old mesh safely
+                    rec.mesh.geometry.dispose()
+                        ; (rec.mesh.material as any).map?.dispose?.()
+                        ; (rec.mesh.material as any).dispose?.()
+                    decalsGroupRef.current?.remove(rec.mesh)
+
+                    // create new decal geometry with same canvas and rotation
+                    const { mesh: newMesh } = createDecalMesh(hitObj as any, pos.clone(), normal.clone(), rec.canvas, newSize, rec.rotDeg ?? 0)
+                    decalsGroupRef.current!.add(newMesh)
+
+                    // update record
+                    rec.mesh = newMesh
+                    rec.sizeForDecal = newSize
+                    setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
+                    window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id, size: newSize } }))
+                    break
+                }
+
+                case 'setFontSize': { // used for text - newFontPx passed in data.fontSize
+                    if (rec.meta.type !== 'text') break
+                    const fontPx = Number(data?.fontSize ?? rec.fontSize ?? 48)
+                    // recreate the canvas with new font size
+                    const newCanvas = makeCanvasForAsset(rec.meta, {
+                        text: rec.text ?? '',
+                        font: rec.font,       // just the family
+                        fontSize: fontPx,     // pass the size separately
+                        color: rec.color
+                    })
+                    // remove old mesh
+                    rec.mesh.geometry.dispose()
+                        ; (rec.mesh.material as any).map?.dispose?.()
+                        ; (rec.mesh.material as any).dispose?.()
+                    decalsGroupRef.current?.remove(rec.mesh)
+
+                    const hitObj2 = rec.hitObject ?? rec.mesh
+                    const pos2 = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
+                    const normal2 = rec.normal ?? new THREE.Vector3(0, 0, 1)
+
+                    // create new mesh using same world sizeForDecal and rotation
+                    const { mesh: newMesh2 } = createDecalMesh(hitObj2 as any, pos2.clone(), normal2.clone(), newCanvas, rec.sizeForDecal ?? 0.5, rec.rotDeg ?? 0)
+                    decalsGroupRef.current!.add(newMesh2)
+
+                    rec.mesh = newMesh2
+                    rec.canvas = newCanvas
+                    rec.fontSize = fontPx
+                    setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
+                    window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id, fontSize: fontPx } }))
+                    break
+                }
+
+                case 'setRotation': {
+                    const rotationDeg = Number(data?.rotationDeg ?? 0)
+                    // recreate geometry rotated in-plane around the normal
+                    const hitObjR = rec.hitObject ?? rec.mesh
+                    const posR = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
+                    const normalR = rec.normal ?? new THREE.Vector3(0, 0, 1)
+
+                    // remove old
+                    rec.mesh.geometry.dispose()
+                        ; (rec.mesh.material as any).map?.dispose?.()
+                        ; (rec.mesh.material as any).dispose?.()
+                    decalsGroupRef.current?.remove(rec.mesh)
+
+                    // create new geometry with rotationDeg applied
+                    const { mesh: newMeshR } = createDecalMesh(hitObjR as any, posR.clone(), normalR.clone(), rec.canvas, rec.sizeForDecal ?? 0.5, rotationDeg)
+                    decalsGroupRef.current!.add(newMeshR)
+
+                    rec.mesh = newMeshR
+                    rec.rotDeg = rotationDeg
+                    setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
+                    window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id, rotationDeg } }))
+                    break
+                }
+
+
                 default:
                     break
             }
@@ -341,80 +482,92 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
         return () => window.removeEventListener('modelCommand', handler)
     }, [modelRef])
 
-    // Drag mechanics: startDecalDrag triggers pointermove based manipulation (move/scale/rotate)
-    const dragState = useRef<{ type: 'move' | 'scale' | 'rotate' | null; id?: string; startX?: number; startY?: number; startScale?: number; startRot?: number }>({ type: null })
-
+    // direct drag: pointerdown on a decal initiates drag (move along model surface)
     useEffect(() => {
+        let activeDragId: string | null = null
+
         const onPointerMove = (ev: PointerEvent) => {
-            const ds = dragState.current
-            if (!ds.type || !ds.id) return
-            const rec = decals.find(d => d.id === ds.id)
-            if (!rec) return
+            if (!activeDragId) return
+            ev.stopPropagation()
+            const rec = decals.find(d => d.id === activeDragId)
+            if (!rec || !modelRef.current) return
             const rect = gl.domElement.getBoundingClientRect()
-            if (ds.type === 'scale') {
-                const dy = ev.clientY - (ds.startY ?? ev.clientY)
-                const factor = 1 + dy * -0.002 // upward drag increases size
-                const newScale = (ds.startScale ?? rec.mesh.scale.x) * factor
-                rec.mesh.scale.setScalar(Math.max(0.05, Math.min(10, newScale)))
-                window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id } }))
-            } else if (ds.type === 'rotate') {
-                const dx = ev.clientX - (ds.startX ?? ev.clientX)
-                const deg = dx * 0.3
-                rec.mesh.rotation.z = (ds.startRot ?? rec.mesh.rotation.z) + (deg * Math.PI / 180)
-                window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id } }))
-            } else if (ds.type === 'move') {
-                // raycast to model to find new hit point
-                const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
-                const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
-                raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
-                // intersect with modelRef children (we want model surface)
-                if (!modelRef.current) return
-                const hits = raycaster.intersectObjects(modelRef.current.children, true)
-                if (!hits.length) return
-                const hit = hits[0]
-                const newPoint = hit.point.clone()
-                const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+            const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
+            const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
+            raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+            const hits = raycaster.intersectObjects(modelRef.current.children, true)
+            if (!hits.length) return
+            const hit = hits[0]
+            const newPoint = hit.point.clone()
+            const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
 
-                // create a new decal mesh at newPoint, preserve scale and rotation
-                const { mesh: newMesh } = createDecalMesh(hit.object, newPoint, normal, rec.canvas, rec.size)
-                newMesh.scale.copy(rec.mesh.scale)
-                newMesh.rotation.copy(rec.mesh.rotation)
-                decalsGroupRef.current!.add(newMesh)
-
-                // remove old
-                rec.mesh.geometry.dispose()
-                    ; (rec.mesh.material as any).map?.dispose?.()
-                    ; (rec.mesh.material as any).dispose?.()
-                decalsGroupRef.current!.remove(rec.mesh)
-
-                // replace
-                rec.mesh = newMesh
-                setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
-                window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id } }))
-            }
+            // create new decal geometry at newPoint keeping scale & rotation
+            const { mesh: newMesh } = createDecalMesh(hit.object, newPoint, normal, rec.canvas, rec.size)
+            newMesh.scale.copy(rec.mesh.scale)
+            newMesh.rotation.copy(rec.mesh.rotation)
+            // add and remove old mesh
+            decalsGroupRef.current!.add(newMesh)
+            rec.mesh.geometry.dispose()
+                ; (rec.mesh.material as any).map?.dispose?.()
+                ; (rec.mesh.material as any).dispose?.()
+            decalsGroupRef.current!.remove(rec.mesh)
+            rec.mesh = newMesh
+            rec.hitObject = hit.object
+            rec.position = newPoint.clone()
+            rec.normal = normal.clone()
+            setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
+            window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id } }))
         }
 
-        const onPointerUp = () => {
-            dragState.current = { type: null }
+        const onPointerUp = (ev: PointerEvent) => {
+            if (activeDragId) ev.stopPropagation()
+            activeDragId = null
             window.removeEventListener('pointermove', onPointerMove)
             window.removeEventListener('pointerup', onPointerUp)
+            // re-enable OrbitControls
+            const controls = (gl as any).controls
+            if (controls) controls.enabled = true
         }
 
-        const startHandler = (ev: any) => {
-            const { type, id, clientX, clientY } = ev.detail || {}
-            if (!type || !id) return
-            dragState.current = { type, id, startX: clientX, startY: clientY, startScale: decals.find(d => d.id === id)?.mesh.scale.x, startRot: decals.find(d => d.id === id)?.mesh.rotation.z }
+        const onPointerDown = (ev: PointerEvent) => {
+            if (!modelRef.current || !!assetSelection) return
+
+            const rect = gl.domElement.getBoundingClientRect()
+            const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
+            const y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
+            raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+            const hits = raycaster.intersectObjects(decalsGroupRef.current?.children ?? [], true)
+            const pick = hits.find(h => h.object.userData.selectable)
+            if (!pick) return
+
+            const found = decals.find(d => d.mesh === pick.object || d.mesh === pick.object.parent)
+            if (!found) return
+
+            ev.stopPropagation() // <- key: stop event from reaching OrbitControls
+            activeDragId = found.id
+
+            // disable OrbitControls while dragging
+            const controls = (gl as any).controls
+            if (controls) controls.enabled = false
+
             window.addEventListener('pointermove', onPointerMove)
             window.addEventListener('pointerup', onPointerUp)
+
+            setSelectedId(found.id)
+            window.dispatchEvent(new CustomEvent('decalSelected', { detail: found.id }))
         }
 
-        window.addEventListener('startDecalDrag', startHandler)
+
+        // listen on the canvas DOM element
+        const canvasEl = gl.domElement
+        canvasEl.addEventListener('pointerdown', onPointerDown)
         return () => {
-            window.removeEventListener('startDecalDrag', startHandler)
+            canvasEl.removeEventListener('pointerdown', onPointerDown)
             window.removeEventListener('pointermove', onPointerMove)
             window.removeEventListener('pointerup', onPointerUp)
         }
-    }, [decals, camera, gl, raycaster])
+    }, [decals, modelRef, assetSelection, camera, gl, raycaster])
+
 
     // Side-panel selection -> select decal by id
     useEffect(() => {
@@ -431,20 +584,68 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
     useEffect(() => {
         const handler = (e: any) => {
             if (e.type === 'exportPNG') {
-                const prev = gl.getSize(new THREE.Vector2())
+                if (!gl || !scene || !camera) return
+
+                // Save original state
+                const prevSize = gl.getSize(new THREE.Vector2())
+                const prevPixelRatio = gl.getPixelRatio()
+
+                // Target size: maintain camera aspect to avoid stretching
                 const dpr = Math.min(window.devicePixelRatio, 2)
-                const w = Math.floor(window.innerWidth * dpr)
+                const w = Math.floor(window.innerHeight * camera.aspect * dpr)
                 const h = Math.floor(window.innerHeight * dpr)
+                gl.setPixelRatio(dpr)
                 gl.setSize(w, h, false)
+
+                // Render scene to get transparent output
+                scene.background = null
                 gl.render(scene, camera)
+                scene.background = new THREE.Color(bgColor) // restore after export
+
+                // Export
                 const url = gl.domElement.toDataURL('image/png')
-                gl.setSize(prev.x, prev.y, false)
                 const a = document.createElement('a')
                 a.href = url
                 a.download = 'mockup.png'
                 a.click()
                 a.remove()
-            } else if (e.type === 'clearDecals') {
+
+                // Restore original
+                gl.setSize(prevSize.x, prevSize.y, false)
+                gl.setPixelRatio(prevPixelRatio)
+            } else if (e.type === 'exportGLB') {
+                // --- GLB Export ---
+                const exporter = new GLTFExporter()
+
+                // Clone scene so original stays untouched
+                const exportScene = scene.clone(true)
+                if (decalsGroupRef.current) {
+                    exportScene.add(decalsGroupRef.current.clone(true))
+                }
+
+                exporter.parse(
+                    exportScene,
+                    (result) => {
+                        let blob: Blob
+                        if (result instanceof ArrayBuffer) {
+                            blob = new Blob([result], { type: 'application/octet-stream' })
+                        } else {
+                            const output = JSON.stringify(result, null, 2)
+                            blob = new Blob([output], { type: 'text/plain' })
+                        }
+
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = 'mockup.glb'
+                        a.click()
+                        URL.revokeObjectURL(url)
+                    },
+                    { binary: true } as any// export as .glb
+                )
+            }
+
+            else if (e.type === 'clearDecals') {
                 decals.forEach(d => {
                     d.mesh.geometry.dispose()
                         ; (d.mesh.material as any).map?.dispose?.()
@@ -456,13 +657,17 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
                 window.dispatchEvent(new CustomEvent('decalRemoved', { detail: { id: null } }))
             }
         }
+
         window.addEventListener('exportPNG', handler)
+        window.addEventListener('exportGLB', handler)
         window.addEventListener('clearDecals', handler)
         return () => {
             window.removeEventListener('exportPNG', handler)
+            window.removeEventListener('exportGLB', handler)
             window.removeEventListener('clearDecals', handler)
         }
     }, [decals, gl, scene, camera])
+
 
     // UI anchor for selected decal (compute world position each frame)
     const [uiPos, setUiPos] = useState<THREE.Vector3 | null>(null)
@@ -502,55 +707,6 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection }
             }}
             onPointerDown={onPointerDown}
         >
-            {/* We no longer render gltf directly here; modelRef holds the model which is mounted into containerRef */}
-            {/* Render nothing for decals because they are children of decalsGroupRef which is a child of containerRef */}
-            {/* In-canvas handles for selected decal */}
-            {selectedId && uiPos && (
-                <Html position={uiPos} center>
-                    <div style={{ transform: 'translateY(-140%)', pointerEvents: 'auto' }} className="flex gap-1 p-1 bg-white/95 rounded shadow-lg">
-                        <button
-                            title="Delete"
-                            onClick={() => window.dispatchEvent(new CustomEvent('decalCommand', { detail: { id: selectedId, action: 'delete' } }))}
-                            className="p-1 bg-red-600 rounded"
-                        >
-                            🗑
-                        </button>
-
-                        <button
-                            title="Rotate (drag)"
-                            onPointerDown={(ev) => {
-                                ev.stopPropagation()
-                                window.dispatchEvent(new CustomEvent('startDecalDrag', { detail: { type: 'rotate', id: selectedId, clientX: ev.clientX, clientY: ev.clientY } }))
-                            }}
-                            className="p-1 bg-gray-800 rounded text-white"
-                        >
-                            🔄
-                        </button>
-
-                        <button
-                            title="Scale (drag)"
-                            onPointerDown={(ev) => {
-                                ev.stopPropagation()
-                                window.dispatchEvent(new CustomEvent('startDecalDrag', { detail: { type: 'scale', id: selectedId, clientX: ev.clientX, clientY: ev.clientY } }))
-                            }}
-                            className="p-1 bg-gray-800 rounded text-white"
-                        >
-                            ↔️
-                        </button>
-
-                        <button
-                            title="Move (drag)"
-                            onPointerDown={(ev) => {
-                                ev.stopPropagation()
-                                window.dispatchEvent(new CustomEvent('startDecalDrag', { detail: { type: 'move', id: selectedId, clientX: ev.clientX, clientY: ev.clientY } }))
-                            }}
-                            className="p-1 bg-gray-800 rounded text-white"
-                        >
-                            ✥
-                        </button>
-                    </div>
-                </Html>
-            )}
         </group>
     )
 }

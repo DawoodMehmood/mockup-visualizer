@@ -7,7 +7,7 @@ import { FiLoader } from 'react-icons/fi'
 
 export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor = '#0f172a' }: any) {
     return (
-        <Canvas shadows camera={{ position: [0, 1.5, 3], fov: 50 }}>
+        <Canvas shadows camera={{ position: [0, 1.5, 3], fov: 50 }} >
             {/* set background color for the scene */}
             <color attach="background" args={[bgColor]} />
             <ambientLight intensity={0.6} />
@@ -21,6 +21,7 @@ export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor =
                         logos={logos}
                         texts={texts}
                         assetSelection={assetSelection}
+                        bgColor={bgColor}
                     />
                 )}
                 <Environment preset="studio" />

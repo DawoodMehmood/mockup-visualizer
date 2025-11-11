@@ -17,6 +17,7 @@ export default function App() {
   const [inputKey, setInputKey] = useState(0)
   const [glbUrl, setGlbUrl] = useState<string | null>(null)
   const [modelLoaded, setModelLoaded] = useState(false)
+  const [clearAllDecals, setClearAllDecals] = useState(false)
 
   // UI state
   const [activeTab, setActiveTab] = useState<'Model' | 'Colors' | 'Texts' | 'Logos'>('Model')
@@ -51,6 +52,7 @@ export default function App() {
     setModelRoot(null)
     setModelLoaded(false)
     setInputKey((prev) => prev + 1)
+    setClearAllDecals(true)
 
     // ask ModelWithDecals to clear decals
     window.dispatchEvent(new CustomEvent('clearDecals'))
@@ -161,13 +163,9 @@ export default function App() {
           ))}
         </div>
       </div>
-
-      <div className="mt-4">
-        <h4 className="text-sm font-medium mb-2">Placed items</h4>
-        <DecalList />
-      </div>
     </div>
   )
+
 
   const LogosTab = (
     <div className="space-y-4">
@@ -214,8 +212,12 @@ export default function App() {
                   className="px-2 py-1 bg-red-600 text-white rounded text-xs"
                   onClick={() => {
                     if (!window.confirm('Delete this logo?')) return
+                    // remove logo from assets
                     setLogos((s) => s.filter((_, idx) => idx !== i))
+                    // if that logo was selected, clear selection
                     if (assetSelection?.type === 'logo' && assetSelection.index === i) setAssetSelection(null)
+                    // tell ModelWithDecals to remove any decals that reference this logo index
+                    window.dispatchEvent(new CustomEvent('removeLogoAsset', { detail: { index: i } }))
                   }}
                 >
                   Delete
@@ -317,18 +319,33 @@ export default function App() {
           {activeTab === 'Colors' && ColorsTab}
           {activeTab === 'Texts' && TextsTab}
           {activeTab === 'Logos' && LogosTab}
+          <div className={`${activeTab === 'Texts' || activeTab === 'Logos' ? 'block' : 'hidden'} mt-4`}>
+            <DecalList activeTab={activeTab} clearAllDecals={clearAllDecals} />
+          </div>
         </div>
 
+
         {/* Bottom buttons */}
-        <div className="mt-6 flex items-center justify-end gap-5">
-          <button
-            className="bg-indigo-600 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
-            onClick={() => window.dispatchEvent(new CustomEvent('exportPNG'))}
-            disabled={!modelLoaded}
-          >
-            <FiDownload className="mr-2 text-lg" />
-            <span>Export PNG</span>
-          </button>
+        <div className="mt-8 flex flex-col items-center justify-center gap-2">
+          <div className='flex items-center justify-center gap-2'>
+            <button
+              className="bg-indigo-600 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
+              onClick={() => window.dispatchEvent(new CustomEvent('exportPNG'))}
+              disabled={!modelLoaded}
+            >
+              <FiDownload className="mr-2 text-lg" />
+              <span>Export PNG</span>
+            </button>
+
+            <button
+              className="bg-indigo-600 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
+              onClick={() => window.dispatchEvent(new CustomEvent('exportGLB'))}
+              disabled={!modelLoaded}
+            >
+              <FiDownload className="mr-2 text-lg" />
+              <span>Export GLB</span>
+            </button>
+          </div>
 
           <button
             className="bg-red-600 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"

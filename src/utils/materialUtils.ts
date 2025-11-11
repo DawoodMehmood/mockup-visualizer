@@ -77,31 +77,3 @@ export async function sampleMaterialColor(mat: THREE.Material & { color?: THREE.
         return '#888888'
     }
 }
-
-/**
- * Bake a tinted copy of a texture by drawing and multiplying.
- * This returns a THREE.CanvasTexture that you can assign to material.map.
- */
-export function recolorTextureMap(texture: THREE.Texture, tintHex: string): THREE.CanvasTexture {
-    const img = texture.image as HTMLImageElement | HTMLCanvasElement
-    const w = (img as any).width || 512
-    const h = (img as any).height || 512
-    const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d')!
-    // draw base
-    ctx.drawImage(img as any, 0, 0, w, h)
-    // multiply by tint
-    ctx.globalCompositeOperation = 'multiply'
-    ctx.fillStyle = tintHex
-    ctx.fillRect(0, 0, w, h)
-    // restore by drawing original with destination-atop to keep alpha
-    ctx.globalCompositeOperation = 'destination-atop'
-    ctx.drawImage(img as any, 0, 0, w, h)
-
-    const newTex = new THREE.CanvasTexture(canvas)
-        ; (newTex as any).encoding = (THREE as any).sRGBEncoding ?? (THREE as any).SRGBColorSpace
-        ; (newTex as any).needsUpdate = true
-    return newTex
-}
