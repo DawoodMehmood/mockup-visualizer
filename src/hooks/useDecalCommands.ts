@@ -2,6 +2,7 @@
 import { useEffect } from 'react'
 import * as THREE from 'three'
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
+import type { DecalRec } from '../components/ModelWithDecals'
 
 export function useDecalCommands(params: {
     gl: any

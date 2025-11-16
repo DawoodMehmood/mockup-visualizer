@@ -127,27 +127,27 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
     ) => {
         // Normalize the normal
         const normalWorld = normal.clone().normalize()
-        
+
         // Use camera's up vector as reference for consistent orientation
         // If camera is not provided, use world up (0, 1, 0) as fallback
-        const worldUp = camera 
+        const worldUp = camera
             ? new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
             : new THREE.Vector3(0, 1, 0)
-        
+
         // Calculate right vector (tangent to surface)
         const right = new THREE.Vector3().crossVectors(normalWorld, worldUp).normalize()
-        
+
         // If right is too small (normal is parallel to worldUp), use camera forward as reference
         if (right.length() < 0.1) {
-            const cameraForward = camera 
+            const cameraForward = camera
                 ? new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
                 : new THREE.Vector3(0, 0, -1)
             right.crossVectors(normalWorld, cameraForward).normalize()
         }
-        
+
         // Calculate the actual up vector on the surface (perpendicular to normal and right)
         const surfaceUp = new THREE.Vector3().crossVectors(right, normalWorld).normalize()
-        
+
         // Build rotation matrix from right, surfaceUp, and normal
         const matrix = new THREE.Matrix4()
         matrix.makeBasis(right, surfaceUp, normalWorld)
@@ -210,7 +210,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         const hit = intersects[0]
         const point = hit.point.clone()
         let normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
-        
+
         // Flip normal if it's pointing away from camera (ensures decal faces camera)
         const cameraDir = camera.getWorldDirection(new THREE.Vector3())
         if (normal.dot(cameraDir) > 0) {
@@ -303,7 +303,6 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         setDecals,
         assetSelection,
         setSelectedId,
-        createDecalMesh
     })
 
 
