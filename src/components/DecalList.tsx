@@ -158,7 +158,7 @@ export default function DecalList({ activeTab, clearAllDecals }: { activeTab: st
                             {/* Logo editing (color + size) */}
                             {d.meta.type === 'logo' && (
                                 <div className="mt-2 space-y-2">
-                                    <div className="flex items-center gap-2">
+                                    {/* <div className="flex items-center gap-2">
                                         <div className="text-xs text-gray-500">Color:</div>
                                         <input
                                             type="color"
@@ -170,7 +170,7 @@ export default function DecalList({ activeTab, clearAllDecals }: { activeTab: st
                                                 doCommand(d.id, 'updateColor', { color })
                                             }}
                                         />
-                                    </div>
+                                    </div> */}
 
                                     <div>
                                         <div className="text-xs text-gray-600">Size (world units)</div>
