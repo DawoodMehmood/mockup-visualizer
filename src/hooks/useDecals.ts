@@ -19,8 +19,8 @@ export function useDecals(params: {
         width: number,
         rotationDeg: number
     ) => {
-        mesh: THREE.Mesh<DecalGeometry, THREE.MeshStandardMaterial, THREE.Object3DEventMap>;
-        mat: THREE.MeshStandardMaterial;
+        mesh: THREE.Mesh<DecalGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>;
+        mat: THREE.MeshBasicMaterial;
         tex: THREE.CanvasTexture;
         euler: THREE.Euler;
     }

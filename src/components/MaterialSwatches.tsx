@@ -31,7 +31,7 @@ export default function MaterialSwatches({
     }, [modelRoot])
 
     const applyColor = (group: MaterialGroup, hex: string) => {
-        const mat = group.material as THREE.MeshStandardMaterial;
+        const mat = group.material as THREE.MeshBasicMaterial;
 
         // If the material has no map, simply set color
         if (!mat.map) {
@@ -53,7 +53,7 @@ export default function MaterialSwatches({
 
         setGroups((prev) => prev.map((p) => (p.id === group.id ? { ...p, sampleColor: hex } : p)))
 
-        // const mat = group.material as THREE.MeshStandardMaterial;
+        // const mat = group.material as THREE.MeshBasicMaterial;
         // mat.map = null;
 
         // // Set the base color
