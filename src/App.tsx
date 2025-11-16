@@ -232,6 +232,17 @@ export default function App() {
 
   return (
     <div className="h-screen flex">
+
+      {/* Top-left logo */}
+      <div className="absolute top-3 left-3 z-50 flex items-center gap-2">
+        <img
+          src="/mockup-logo.jpeg"
+          alt="Logo"
+          className="w-25 h-25 object-contain"
+        />
+      </div>
+
+
       {/* Left floating controls (vertical) */}
       <div className="absolute left-3 top-1/2 -translate-y-1/2 z-40">
         <div className="flex flex-col gap-2 items-center">
