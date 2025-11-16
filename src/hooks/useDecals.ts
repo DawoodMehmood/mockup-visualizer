@@ -17,7 +17,8 @@ export function useDecals(params: {
         normal: THREE.Vector3,
         canvas: HTMLCanvasElement,
         width: number,
-        rotationDeg: number
+        rotationDeg: number,
+        camera?: THREE.Camera
     ) => {
         mesh: THREE.Mesh<DecalGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>;
         mat: THREE.MeshBasicMaterial;

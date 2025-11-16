@@ -122,16 +122,40 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         normal: THREE.Vector3,
         canvas: HTMLCanvasElement,
         width = 0.5,
-        rotationDeg = 0
+        rotationDeg = 0,
+        camera?: THREE.Camera
     ) => {
-        // base orientation: rotate up (0,0,1) to the surface normal
-        const up = new THREE.Vector3(0, 0, 1)
-        const q = new THREE.Quaternion().setFromUnitVectors(up, normal.clone().normalize())
+        // Normalize the normal
+        const normalWorld = normal.clone().normalize()
+        
+        // Use camera's up vector as reference for consistent orientation
+        // If camera is not provided, use world up (0, 1, 0) as fallback
+        const worldUp = camera 
+            ? new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
+            : new THREE.Vector3(0, 1, 0)
+        
+        // Calculate right vector (tangent to surface)
+        const right = new THREE.Vector3().crossVectors(normalWorld, worldUp).normalize()
+        
+        // If right is too small (normal is parallel to worldUp), use camera forward as reference
+        if (right.length() < 0.1) {
+            const cameraForward = camera 
+                ? new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
+                : new THREE.Vector3(0, 0, -1)
+            right.crossVectors(normalWorld, cameraForward).normalize()
+        }
+        
+        // Calculate the actual up vector on the surface (perpendicular to normal and right)
+        const surfaceUp = new THREE.Vector3().crossVectors(right, normalWorld).normalize()
+        
+        // Build rotation matrix from right, surfaceUp, and normal
+        const matrix = new THREE.Matrix4()
+        matrix.makeBasis(right, surfaceUp, normalWorld)
+        const q = new THREE.Quaternion().setFromRotationMatrix(matrix)
 
         // apply additional rotation around the normal (in-plane)
-        // create a quaternion that rotates around the normal by rotationDeg
         const rotRad = (rotationDeg * Math.PI) / 180
-        const qAroundNormal = new THREE.Quaternion().setFromAxisAngle(normal.clone().normalize(), rotRad)
+        const qAroundNormal = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
 
         // combined rotation: first align to normal, then rotate in-plane
         const finalQuat = q.clone().multiply(qAroundNormal)
@@ -157,15 +181,16 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
             map: tex,
             transparent: true,
             depthWrite: false,
-            depthTest: true,
-            polygonOffset: true,
-            polygonOffsetFactor: -4,
+            depthTest: false,
+            // polygonOffset: true,
+            // polygonOffsetFactor: -4,
             toneMapped: false,
         })
 
         const mesh = new THREE.Mesh(decalGeo, mat)
         mesh.userData.selectable = true
-        mesh.renderOrder = 999
+        mesh.renderOrder = 999999
+        mesh.frustumCulled = false
         return { mesh, mat, tex, euler }
     }
 
@@ -184,23 +209,21 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         if (!intersects.length) return
         const hit = intersects[0]
         const point = hit.point.clone()
-        const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+        let normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+        
+        // Flip normal if it's pointing away from camera (ensures decal faces camera)
+        const cameraDir = camera.getWorldDirection(new THREE.Vector3())
+        if (normal.dot(cameraDir) > 0) {
+            normal.negate()
+        }
 
         const canvas = makeCanvasForAsset(assetSelection)
         const size = 0.5
-        const mainMesh = modelRef.current?.children[0]; // might be a Group
 
         // DecalGeometry wants a mesh
-        // if the model node is a Group, take the first mesh or flatten the children
-        const meshes: THREE.Mesh[] = [];
-        mainMesh!.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh);
-        });
+        const targetMesh = hit.object as THREE.Mesh
 
-        // pick the first mesh, or consider applying decal to all meshes
-        const targetMesh = meshes[0]; // simple fix: use first mesh
-
-        const { mesh } = createDecalMesh(targetMesh, point, normal, canvas, size)
+        const { mesh } = createDecalMesh(targetMesh, point, normal, canvas, size, 0, camera)
 
         // after creating mesh and adding to decal group:
         decalsGroupRef.current!.add(mesh)
