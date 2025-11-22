@@ -23,7 +23,6 @@ export function useDecalDrag(params: {
         let latestXY: { x: number; y: number } | null = null
         let scheduled = false
 
-        // inside your processLatest function (replace existing implementation)
         const processLatest = () => {
             scheduled = false
             if (!activeDragId || !latestXY || !modelRef.current) return
@@ -38,112 +37,94 @@ export function useDecalDrag(params: {
             const rec = decals.find(d => d.id === activeDragId)
             if (!rec) return
 
-            // Temporarily disable raycasting on all decal meshes (efficient - no scene manipulation)
+            // Temporarily disable decal raycasting
             const decalMeshes = new Set(decals.map(d => d.mesh))
             const originalRaycasts = new Map<THREE.Mesh, any>()
             for (const mesh of decalMeshes) {
                 if (mesh.raycast) {
                     originalRaycasts.set(mesh, mesh.raycast)
-                    mesh.raycast = () => {} // Disable raycasting
+                    mesh.raycast = () => { }
                 }
             }
 
-            // Raycast against model children, recursively
-            const modelChildren = modelRef.current.children.filter(child => 
-                child !== decalsGroupRef.current
-            )
-            const hits = raycaster.intersectObjects(modelChildren, true)
-            
-            // Restore raycast methods
+            const hits = raycaster.intersectObjects(modelRef.current!.children, true)
+
             for (const [mesh, originalRaycast] of originalRaycasts) {
                 mesh.raycast = originalRaycast
             }
 
-            if (!hits.length) {
-                return // No surface found, keep drag alive but don't update
-            }
+            if (!hits.length) return
 
             const hit = hits[0]
-            const worldPoint = hit.point.clone()
+            const point = hit.point.clone()
 
-            // compute world-space normal for the hit triangle
-            let normalWorld = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
-            const cameraDir = camera.getWorldDirection(new THREE.Vector3())
-            if (normalWorld.dot(cameraDir) > 0) {
-                normalWorld.negate()
+            // USE THE RAW OUTWARD NORMAL — NEVER FLIP IT!
+            const normalWorld = hit.face!.normal.clone()
+                .transformDirection(hit.object.matrixWorld)
+                .normalize()
+
+            // ———— EXACT SAME ORIENTATION LOGIC AS PLACEMENT ————
+            const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
+
+            let tangent = new THREE.Vector3().crossVectors(camUp, normalWorld).normalize()
+            if (tangent.lengthSq() < 0.01) {
+                const camDir = camera.getWorldDirection(new THREE.Vector3())
+                tangent = new THREE.Vector3().crossVectors(camDir, normalWorld).normalize()
             }
 
-            // Update decal position immediately - no threshold checks for smooth dragging
-            try {
-                const width = rec.sizeForDecal ?? 0.5
-                const depth = Math.max(0.01, width * 0.15)
-                const OFFSET = 0.0015
-                const placementPoint = worldPoint.clone().add(normalWorld.clone().multiplyScalar(OFFSET))
+            const bitangent = new THREE.Vector3().crossVectors(normalWorld, tangent).normalize()
 
-                // Improved orientation calculation for consistent decal orientation
-                // Use camera's up vector as reference for consistent orientation
-                const worldUp = new THREE.Vector3(0, 1, 0).applyQuaternion((camera as any).quaternion).normalize()
-                
-                // Calculate right vector (tangent to surface)
-                const right = new THREE.Vector3().crossVectors(normalWorld, worldUp).normalize()
-                
-                // If right is too small (normal is parallel to worldUp), use camera forward as reference
-                if (right.length() < 0.1) {
-                    const cameraForward = new THREE.Vector3(0, 0, -1).applyQuaternion((camera as any).quaternion).normalize()
-                    right.crossVectors(normalWorld, cameraForward).normalize()
-                }
-                
-                // Calculate the actual up vector on the surface (perpendicular to normal and right)
-                const surfaceUp = new THREE.Vector3().crossVectors(right, normalWorld).normalize()
-                
-                // Build rotation matrix from right, surfaceUp, and normal
-                const matrix = new THREE.Matrix4()
-                matrix.makeBasis(right, surfaceUp, normalWorld)
-                const qAlign = new THREE.Quaternion().setFromRotationMatrix(matrix)
-                
-                // Apply in-plane rotation around the normal
-                const rotRad = ((rec.rotDeg ?? 0) * Math.PI) / 180
-                const qAroundNormal = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
-                const finalQuat = qAlign.clone().multiply(qAroundNormal)
-                const euler = new THREE.Euler().setFromQuaternion(finalQuat, 'XYZ')
+            const matrix = new THREE.Matrix4()
+            matrix.makeBasis(tangent, bitangent, normalWorld)
 
-                const newGeo = new DecalGeometry(hit.object as any, placementPoint, euler, new THREE.Vector3(width, width, depth))
+            let finalQuat = new THREE.Quaternion().setFromRotationMatrix(matrix)
 
-                if (rec.mesh.geometry) rec.mesh.geometry.dispose()
-                rec.mesh.geometry = newGeo
+            // Apply saved in-plane rotation
+            if (rec.rotDeg !== undefined && rec.rotDeg !== 0) {
+                const rotRad = THREE.MathUtils.degToRad(rec.rotDeg)
+                const qRot = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
+                finalQuat = finalQuat.multiply(qRot)
+            }
 
-                // Check if position changed significantly before updating
-                const prevPos = rec.position ? rec.position.clone() : null
-                const hasChanged = !prevPos || prevPos.distanceTo(placementPoint) > 0.001
+            const euler = new THREE.Euler().setFromQuaternion(finalQuat, 'XYZ')
 
-                rec.hitObject = hit.object
-                rec.position = placementPoint.clone()
-                rec.normal = normalWorld.clone()
+            // ———— DECAL BOX (same as placement) ————
+            const width = rec.sizeForDecal ?? 0.5
+            const padding = 1.5
+            const depthPadding = 4
+            const depth = Math.max(0.01, width * 0.15)
 
-                rec.mesh.renderOrder = 999999
-                rec.mesh.frustumCulled = false
-                if ((rec.mesh.material as any).depthTest !== false) {
-                    (rec.mesh.material as any).depthTest = false
-                    ; (rec.mesh.material as any).depthWrite = false
-                    ; (rec.mesh.material as any).needsUpdate = true
-                }
+            const placementPoint = point.clone().add(normalWorld.clone().multiplyScalar(0.005))
 
-                // Only update state if decal actually changed position significantly (reduces unnecessary re-renders)
-                if (hasChanged) {
-                    setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
-                    window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id } }))
-                }
-            } catch (err) {
-                console.warn('decal drag update failed', err)
+            const newGeo = new DecalGeometry(
+                hit.object as THREE.Mesh,
+                placementPoint,
+                euler,
+                new THREE.Vector3(width * padding, width * padding, depth * depthPadding)
+            )
+
+            if (rec.mesh.geometry) rec.mesh.geometry.dispose()
+            rec.mesh.geometry = newGeo
+
+            // Update stored hit info
+            rec.hitObject = hit.object
+            rec.position = placementPoint.clone()
+            rec.normal = normalWorld.clone()
+
+            // Trigger update only if moved significantly
+            const prevPos = rec.position
+            const moved = !prevPos || prevPos.distanceTo(placementPoint) > 0.001
+
+            if (moved) {
+                setDecals(prev => prev.map(p => p.id === rec.id ? { ...rec } : p))
+                window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id } }))
             }
         }
-
 
         const onPointerMove = (ev: PointerEvent) => {
             if (!activeDragId) return
             ev.preventDefault()
             latestXY = { x: ev.clientX, y: ev.clientY }
-            // Always schedule an update to ensure smooth continuous movement
             if (!scheduled) {
                 scheduled = true
                 requestAnimationFrame(processLatest)
@@ -153,7 +134,7 @@ export function useDecalDrag(params: {
         const onPointerUp = (ev: PointerEvent) => {
             if (activeDragId) ev.stopPropagation()
             if (pointerIdHeld !== null && ev.pointerId === pointerIdHeld) {
-                try { gl.domElement.releasePointerCapture?.(pointerIdHeld) } catch { }
+                try { gl.domElement.releasePointerCapture(pointerIdHeld) } catch { }
             }
             activeDragId = null
             pointerIdHeld = null
@@ -163,15 +144,13 @@ export function useDecalDrag(params: {
             window.removeEventListener('pointerup', onPointerUp)
             const controls = (gl as any).controls
             if (controls) controls.enabled = true
-            // restore touch action if you changed it
             try { gl.domElement.style.touchAction = '' } catch { }
         }
 
         const onPointerDown = (ev: PointerEvent) => {
             if (!modelRef.current || !!assetSelection) return
 
-            // try to capture pointer so moves outside canvas still come here
-            try { gl.domElement.setPointerCapture?.(ev.pointerId); pointerIdHeld = ev.pointerId } catch { }
+            try { gl.domElement.setPointerCapture(ev.pointerId); pointerIdHeld = ev.pointerId } catch { }
 
             const rect = gl.domElement.getBoundingClientRect()
             const x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
@@ -181,46 +160,34 @@ export function useDecalDrag(params: {
             const hits = raycaster.intersectObjects(decalsGroupRef.current?.children ?? [], true)
             const pick = hits.find(h => h.object.userData.selectable)
             if (!pick) {
-                try { gl.domElement.releasePointerCapture?.(ev.pointerId); pointerIdHeld = null } catch { }
+                try { gl.domElement.releasePointerCapture(ev.pointerId); pointerIdHeld = null } catch { }
                 return
             }
 
             const found = decals.find(d => d.mesh === pick.object || d.mesh === pick.object.parent)
-            if (!found) {
-                try { gl.domElement.releasePointerCapture?.(ev.pointerId); pointerIdHeld = null } catch { }
-                return
-            }
+            if (!found) return
 
             ev.stopPropagation()
             ev.preventDefault()
 
             activeDragId = found.id
+            latestXY = null // prevents jump on first move
 
-            // disable orbit controls while dragging
             const controls = (gl as any).controls
             if (controls) controls.enabled = false
-
-            // prevent browser gestures from interrupting on touch
             gl.domElement.style.touchAction = 'none'
 
             window.addEventListener('pointermove', onPointerMove, { passive: false })
             window.addEventListener('pointerup', onPointerUp)
 
-            // DON'T update immediately on pointer down - wait for pointer move
-            // This prevents the decal from jumping to the click position
-            latestXY = null
-
             setSelectedId(found.id)
-            window.dispatchEvent(new CustomEvent('decalSelected', { detail: found.id }))
+            window.dispatchEvent(new CustomEvent('decalSelected', { detail: { id: found.id } }))
         }
 
         const canvasEl = gl.domElement
-        canvasEl.style.touchAction = canvasEl.style.touchAction || 'none'
         canvasEl.addEventListener('pointerdown', onPointerDown)
         return () => {
             canvasEl.removeEventListener('pointerdown', onPointerDown)
-            window.removeEventListener('pointermove', onPointerMove)
-            window.removeEventListener('pointerup', onPointerUp)
         }
     }, [decals, modelRef, assetSelection, camera, gl, raycaster, setDecals, setSelectedId, decalsGroupRef])
 }

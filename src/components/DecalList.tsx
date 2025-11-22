@@ -1,32 +1,19 @@
 // src/components/DecalList.tsx
 import { useEffect, useState } from 'react'
 import { FiTrash } from 'react-icons/fi'
-
-type DecalItem = {
-    id: string
-    thumb?: string
-    meta: { type: 'logo' | 'text'; assetIndex?: number }
-    text?: string
-    font?: string
-    color?: string
-    // logo size in world-units (width)
-    size?: number
-    // text font size in px
-    fontSize?: number
-    rotationDeg?: number
-}
+import type { DecalRec } from './ModelWithDecals'
 
 const FONT_OPTIONS = ['sans-serif', 'serif', 'monospace', 'cursive', 'Helvetica', 'Arial']
 
 export default function DecalList({ activeTab, clearAllDecals }: { activeTab: string, clearAllDecals: Boolean }) {
-    const [decals, setDecals] = useState<DecalItem[]>([])
+    const [decals, setDecals] = useState<DecalRec[]>([])
     const [selectedId, setSelectedId] = useState<string | null>(null)
 
     useEffect(() => {
         const placed = (e: any) => {
             const d = e.detail
             // initialize with sensible defaults (size/fontSize/rotation)
-            const init: DecalItem = {
+            const init: DecalRec = {
                 size: d.size ?? 0.5,
                 fontSize: d.fontSize ?? 48,
                 rotationDeg: d.rotationDeg ?? 0,
@@ -94,7 +81,7 @@ export default function DecalList({ activeTab, clearAllDecals }: { activeTab: st
                             <div className="flex items-center justify-between">
                                 <div className="text-xs font-medium">{d.meta.type === 'text' ? `Text` : 'Logo'}</div>
                                 <div className="flex gap-2">
-                                    <button className="px-2 py-1 rounded bg-gray-200 text-xs" onClick={() => select(d.id)}>Select</button>
+                                    {/* <button className="px-2 py-1 rounded bg-gray-200 text-xs" onClick={() => select(d.id)}>Select</button> */}
                                     <button className="px-2 py-1 rounded text-xs" onClick={() => doCommand(d.id, 'delete')}><FiTrash size={16} color="red" /></button>
                                 </div>
                             </div>
@@ -158,20 +145,6 @@ export default function DecalList({ activeTab, clearAllDecals }: { activeTab: st
                             {/* Logo editing (color + size) */}
                             {d.meta.type === 'logo' && (
                                 <div className="mt-2 space-y-2">
-                                    {/* <div className="flex items-center gap-2">
-                                        <div className="text-xs text-gray-500">Color:</div>
-                                        <input
-                                            type="color"
-                                            className="w-10 h-8 p-0 border rounded"
-                                            value={d.color ?? '#ffffff'}
-                                            onChange={(e) => {
-                                                const color = e.target.value
-                                                setDecals((s) => s.map(item => item.id === d.id ? { ...item, color } : item))
-                                                doCommand(d.id, 'updateColor', { color })
-                                            }}
-                                        />
-                                    </div> */}
-
                                     <div>
                                         <div className="text-xs text-gray-600">Size (world units)</div>
                                         <input

@@ -100,7 +100,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         } else {
             const img = logoImgsRef.current[asset.index]
             if (img && img.complete && img.naturalWidth) {
-                const scale = Math.min(SIZE / img.width, SIZE / img.height) * 0.9
+                const scale = Math.min(SIZE / img.width, SIZE / img.height) * 0.85
                 const w = img.width * scale
                 const h = img.height * scale
                 const x = (SIZE - w) / 2
@@ -128,29 +128,27 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         // Normalize the normal
         const normalWorld = normal.clone().normalize()
 
-        // Use camera's up vector as reference for consistent orientation
-        // If camera is not provided, use world up (0, 1, 0) as fallback
-        const worldUp = camera
+        // Reference "up" = camera's up direction (world space)
+        const camUp = camera
             ? new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
-            : new THREE.Vector3(0, 1, 0)
+            : new THREE.Vector3(0, 1, 0);
 
-        // Calculate right vector (tangent to surface)
-        const right = new THREE.Vector3().crossVectors(normalWorld, worldUp).normalize()
-
-        // If right is too small (normal is parallel to worldUp), use camera forward as reference
-        if (right.length() < 0.1) {
-            const cameraForward = camera
-                ? new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize()
-                : new THREE.Vector3(0, 0, -1)
-            right.crossVectors(normalWorld, cameraForward).normalize()
+        // Build tangent (right vector)
+        let tangent = new THREE.Vector3().crossVectors(camUp, normal).normalize();
+        if (tangent.lengthSq() < 0.01) {
+            // rare case: normal almost parallel to camera up → fall back to camera forward
+            const camDir = camera!.getWorldDirection(new THREE.Vector3());
+            tangent = new THREE.Vector3().crossVectors(camDir, normal).normalize();
         }
 
-        // Calculate the actual up vector on the surface (perpendicular to normal and right)
-        const surfaceUp = new THREE.Vector3().crossVectors(right, normalWorld).normalize()
+        // Recompute bitangent (surface up) to be exactly perpendicular
+        const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
 
-        // Build rotation matrix from right, surfaceUp, and normal
-        const matrix = new THREE.Matrix4()
-        matrix.makeBasis(right, surfaceUp, normalWorld)
+        // Build orientation matrix
+        const matrix = new THREE.Matrix4();
+        matrix.makeBasis(tangent, bitangent, normal); // right, up, forward (normal)
+
+
         const q = new THREE.Quaternion().setFromRotationMatrix(matrix)
 
         // apply additional rotation around the normal (in-plane)
@@ -163,14 +161,22 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
 
         // depth small; keep depth proportional to width (thin)
         const depth = Math.max(0.01, width * 0.15)
-        const OFFSET = 0.001; // 1mm offset to prevent clipping
+        const OFFSET = 0.005; // offset to prevent clipping
         const placementPoint = point.clone().add(normal.clone().multiplyScalar(OFFSET));
+
+        // Use: oversized box with padding
+        const padding = 1.5;      // 1.4–1.8 works great
+        const depthPadding = 4;   // 3–6 for curved surfaces
 
         const decalGeo = new DecalGeometry(
             hitObject as any,
             placementPoint,
             euler,
-            new THREE.Vector3(width, width, depth)
+            new THREE.Vector3(
+                width * padding,
+                width * padding,
+                depth * depthPadding
+            )
         );
 
         const tex = new THREE.CanvasTexture(canvas)
@@ -182,8 +188,8 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
             transparent: true,
             depthWrite: false,
             depthTest: false,
-            // polygonOffset: true,
-            // polygonOffsetFactor: -4,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
             toneMapped: false,
         })
 
@@ -209,13 +215,9 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         if (!intersects.length) return
         const hit = intersects[0]
         const point = hit.point.clone()
-        let normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
-
-        // Flip normal if it's pointing away from camera (ensures decal faces camera)
-        const cameraDir = camera.getWorldDirection(new THREE.Vector3())
-        if (normal.dot(cameraDir) > 0) {
-            normal.negate()
-        }
+        const normal = hit.face!.normal.clone()
+            .transformDirection(hit.object.matrixWorld)
+            .normalize()
 
         const canvas = makeCanvasForAsset(assetSelection)
         const size = 0.5

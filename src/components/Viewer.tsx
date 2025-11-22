@@ -5,7 +5,7 @@ import { OrbitControls, Environment, Html } from '@react-three/drei'
 import ModelWithDecals from './ModelWithDecals'
 import { FiLoader } from 'react-icons/fi'
 
-export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor = '#0f172a' }: any) {
+export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor = '#070a12' }: any) {
     return (
         <Canvas shadows camera={{ position: [0, 1.5, 3], fov: 50 }} >
             {/* set background color for the scene */}
@@ -24,7 +24,7 @@ export default function Viewer({ glbUrl, logos, texts, assetSelection, bgColor =
                         bgColor={bgColor}
                     />
                 )}
-                <Environment preset="studio" />
+                <Environment preset="sunset" blur={4} />
             </Suspense>
 
             <OrbitControls
