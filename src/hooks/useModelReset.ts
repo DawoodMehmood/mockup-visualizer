@@ -72,5 +72,5 @@ export function useModelReset(params: {
 
         // notify the app / MaterialSwatches about the loaded model root
         window.dispatchEvent(new CustomEvent('modelReady', { detail: { model: modelRef.current } }))
-    }, [gltf, camera])
+    }, [gltf, camera, modelRef])
 }

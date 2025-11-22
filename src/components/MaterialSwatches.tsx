@@ -52,30 +52,6 @@ export default function MaterialSwatches({
         mat.needsUpdate = true
 
         setGroups((prev) => prev.map((p) => (p.id === group.id ? { ...p, sampleColor: hex } : p)))
-
-        // const mat = group.material as THREE.MeshBasicMaterial;
-        // mat.map = null;
-
-        // // Set the base color
-        // if (!mat.color) mat.color = new THREE.Color(hex);
-        // else mat.color.set(hex);
-
-        // // Optional: set emissive for "unlit" effect
-        // mat.emissive.set(hex);
-        // mat.emissiveIntensity = 1;
-
-        // // Neutralize PBR interference
-        // mat.metalness = 0;
-        // mat.roughness = 1; // or 0.5 depending on preference
-        // mat.transparent = false;
-        // mat.depthWrite = true;
-        // mat.toneMapped = false;
-
-        // mat.needsUpdate = true;
-
-        // setGroups(prev =>
-        //     prev.map(p => (p.id === group.id ? { ...p, sampleColor: hex } : p))
-        // );
     }
 
     if (!modelRoot) return null
