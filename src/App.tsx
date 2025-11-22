@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Viewer from './components/Viewer'
 import MaterialSwatches from './components/MaterialSwatches'
 import DecalList from './components/DecalList'
@@ -22,6 +22,63 @@ export default function App() {
   // UI state
   const [activeTab, setActiveTab] = useState<'Model' | 'Colors' | 'Texts' | 'Logos'>('Model')
   const [canvasBgWhite, setCanvasBgWhite] = useState(false)
+
+  const [uvReport, setUvReport] = useState<any | null>(null)         // UVReport from useUVChecks
+  const [uvModalOpen, setUvModalOpen] = useState(false)
+
+  // Listen for global UV check results emitted by the viewer/model component
+  useEffect(() => {
+    const onUvResult = (e: any) => {
+      const report = e?.detail ?? null
+      setUvReport(report)
+      // auto accept if ok
+      if (report && report.ok) {
+        console.log('uv report: ', report)
+        setUvModalOpen(false)
+      } else {
+        // open modal and wait for user decision
+        setUvModalOpen(true)
+      }
+    }
+    const setUvModal = () => setUvModalOpen(true)
+    window.addEventListener('uvCheckResult', onUvResult)
+    window.addEventListener('uvDecisionNeeded', setUvModal)
+    return () => {
+      window.removeEventListener('uvCheckResult', onUvResult)
+    }
+  }, [])
+
+  // Clear UV state when model deleted
+  useEffect(() => {
+    if (!modelLoaded) {
+      setUvReport(null)
+      setUvModalOpen(false)
+    }
+  }, [modelLoaded])
+
+  useEffect(() => {
+    if (assetSelection) {
+      document.body.style.cursor = 'crosshair'
+    } else {
+      document.body.style.cursor = 'default'
+    }
+
+    return () => {
+      document.body.style.cursor = 'default'
+    }
+  }, [assetSelection])
+
+
+  // Handler when user confirms a choice
+  const handleUvChoice = (choiceUseUV: boolean) => {
+    setUvModalOpen(false)
+    if (choiceUseUV) {
+      return
+    } else {
+      deleteModelAndResetAll()
+    }
+  }
+
 
   useEffect(() => {
     const modelHandler = (e: any) => {
@@ -73,9 +130,9 @@ export default function App() {
 
       <div className='flex justify-center mt-8'>
         {!modelLoaded ? (
-          <label className="relative inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded cursor-pointer hover:bg-indigo-700 transition">
-            <FiUpload className="mr-2 text-lg" />
-            <span>Choose GLB File</span>
+          <label className="relative inline-flex items-center px-4 py-2 bg-sky-900 text-white rounded cursor-pointer hover:bg-sky-950 transition">
+            <FiUpload className="mr-2 text-lg cursor-pointer" />
+            <span className='cursor-pointer'>Choose GLB File</span>
             <input
               key={inputKey}
               type="file"
@@ -142,7 +199,7 @@ export default function App() {
               </div>
               <div className="flex gap-2">
                 <button
-                  className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                  className="px-2 py-1 bg-sky-900 text-white rounded text-xs"
                   onClick={() => setAssetSelection({ type: 'text', index: i })}
                 >
                   Select
@@ -172,7 +229,7 @@ export default function App() {
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Upload Logo</label>
         <div className='flex justify-center'>
-          <label className="relative inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded cursor-pointer hover:bg-indigo-700 transition">
+          <label className="relative inline-flex items-center px-4 py-2 bg-sky-900 text-white rounded cursor-pointer hover:bg-sky-950 transition">
             <FiUpload className="mr-2 text-lg" />
             <span>Choose File</span>
             <input
@@ -182,8 +239,17 @@ export default function App() {
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (!f) return
-                setLogos((s) => [...s, f])
-                setAssetSelection({ type: 'logo', index: logos.length })
+
+                // Use functional update so we can compute the new index synchronously
+                setLogos(prev => {
+                  const newArr = [...prev, f]
+                  // select the newly added logo by using the new array length - 1
+                  // setAssetSelection({ type: 'logo', index: newArr.length - 1 })
+                  return newArr
+                })
+
+                // Force the input to remount so the same file can be chosen again later.
+                setInputKey(k => k + 1)
               }}
               className="absolute inset-0 opacity-0 cursor-pointer"
             />
@@ -203,13 +269,13 @@ export default function App() {
               </div>
               <div className="flex gap-2">
                 <button
-                  className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                  className="px-2 py-1 bg-sky-900 text-white rounded text-xs cursor-pointer"
                   onClick={() => setAssetSelection({ type: 'logo', index: i })}
                 >
                   Select
                 </button>
                 <button
-                  className="px-2 py-1 bg-red-600 text-white rounded text-xs"
+                  className="px-2 py-1 bg-red-600 text-white rounded text-xs cursor-pointer"
                   onClick={() => {
                     if (!window.confirm('Delete this logo?')) return
                     // remove logo from assets
@@ -218,6 +284,9 @@ export default function App() {
                     if (assetSelection?.type === 'logo' && assetSelection.index === i) setAssetSelection(null)
                     // tell ModelWithDecals to remove any decals that reference this logo index
                     window.dispatchEvent(new CustomEvent('removeLogoAsset', { detail: { index: i } }))
+
+                    // bump inputKey to allow re-uploading the same file immediately
+                    setInputKey(k => k + 1)
                   }}
                 >
                   Delete
@@ -236,7 +305,7 @@ export default function App() {
       {/* Top-left logo */}
       <div className="absolute top-3 left-3 z-50 flex items-center gap-2">
         <img
-          src="/mockup-logo.jpeg"
+          src={canvasBgWhite ? '/mockup-logo-white.jpeg' : "/mockup-logo.jpeg"}
           alt="Logo"
           className="w-25 h-25 object-contain"
         />
@@ -299,13 +368,49 @@ export default function App() {
         </div>
       </div>
 
+      {uvModalOpen && uvReport && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative z-70 bg-white text-black rounded-lg max-w-2xl w-[90%] p-6 shadow-lg">
+            <h3 className="text-lg font-semibold mb-2">Model UV check</h3>
+
+            <div className="mb-3 text-sm text-gray-700">
+              The loaded model has {uvReport.meshes?.length ?? 0} mesh(es). The UV check detected:
+            </div>
+
+            <ul className="mb-3 list-disc list-inside text-sm text-gray-700 space-y-1">
+              {Array.from(uvReport.summaryProblems ?? new Set()).length === 0 && (
+                <li>No problems detected — UV mode is recommended.</li>
+              )}
+              {Array.from(uvReport.summaryProblems ?? new Set()).map((p: string) => (
+                <li key={p}>
+                  <strong>{p}</strong>: {
+                    p === 'NO_UVS' ? 'No UVs found — cannot paint reliably.' :
+                      p === 'UV_OUT_OF_BOUNDS' ? 'UVs outside 0..1 — decals may be missing or tiled.' :
+                        p === 'UV_DEGENERATE' ? 'Degenerate/zero-area UVs — texture mapping will fail.' :
+                          p === 'UNIFORMITY_ISSUE' ? 'Severe texel density mismatch — decals will appear inconsistent in size.' :
+                            p
+                  }
+                </li>
+              ))}
+            </ul>
+
+            <div className="flex gap-2 justify-end">
+              <button className="px-4 py-2 rounded bg-gray-200 cursor-pointer" onClick={() => handleUvChoice(false)}>Cancel</button>
+              <button className="px-4 py-2 rounded bg-sky-900 text-white cursor-pointer" onClick={() => handleUvChoice(true)}>Proceed anyway</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
       {/* Main viewer area */}
       <div className="flex-1 relative">
-        <Viewer glbUrl={glbUrl} logos={logos} texts={texts} assetSelection={assetSelection} bgColor={canvasBgWhite ? '#f5f5f5' : '#0f172a'} />
+        <Viewer glbUrl={glbUrl} logos={logos} texts={texts} assetSelection={assetSelection} bgColor={canvasBgWhite ? '#f5f5f5' : '#070a12'} />
       </div>
 
       {/* Right panel */}
-      <aside className="w-100 bg-white text-black p-4 overflow-auto">
+      <aside className="w-100 bg-gray-100 text-black p-4 overflow-auto">
         <h1 className="text-2xl font-bold mb-5">Mockup Visualizer</h1>
 
         {/* Tabs */}
@@ -316,7 +421,7 @@ export default function App() {
               <button
                 key={t}
                 onClick={() => !disabled && setActiveTab(t)}
-                className={`flex-1 text-sm py-2 rounded-full cursor-pointer ${activeTab === t ? 'bg-black text-white' : 'bg-gray-100 text-black border border-gray-500'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                className={`flex-1 text-sm py-2 rounded-full cursor-pointer ${activeTab === t ? 'bg-sky-900 text-white' : 'bg-gray-50 text-black border border-gray-500'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 {t}
               </button>
@@ -340,7 +445,7 @@ export default function App() {
         <div className="mt-8 flex flex-col items-center justify-center gap-2">
           <div className='flex items-center justify-center gap-2'>
             <button
-              className="bg-indigo-600 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
+              className="bg-sky-900 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
               onClick={() => window.dispatchEvent(new CustomEvent('exportPNG'))}
               disabled={!modelLoaded}
             >
@@ -349,7 +454,7 @@ export default function App() {
             </button>
 
             <button
-              className="bg-indigo-600 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
+              className="bg-sky-900 text-white px-4 py-2 rounded cursor-pointer inline-flex items-center"
               onClick={() => window.dispatchEvent(new CustomEvent('exportGLB'))}
               disabled={!modelLoaded}
             >
@@ -384,7 +489,7 @@ function AddTextControl({ onAdd }: { onAdd: (t: string) => void }) {
   return (
     <div className="flex gap-2">
       <input className="flex-1 p-2 border rounded text-black" value={val} onChange={(e) => setVal(e.target.value)} placeholder="Enter text" />
-      <button className="bg-blue-600 text-white px-3 py-2 rounded" onClick={() => { if (!val.trim()) return; onAdd(val.trim()); setVal('') }}>Add</button>
+      <button className="bg-sky-800 text-white px-5 py-2 rounded" onClick={() => { if (!val.trim()) return; onAdd(val.trim()); setVal('') }}>Add</button>
     </div>
   )
 }
