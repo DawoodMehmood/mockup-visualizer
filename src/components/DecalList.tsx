@@ -49,10 +49,10 @@ export default function DecalList({ activeTab, clearAllDecals }: { activeTab: st
     }, [clearAllDecals])
 
 
-    const select = (id: string) => {
-        setSelectedId(id)
-        window.dispatchEvent(new CustomEvent('selectDecalById', { detail: { id } }))
-    }
+    // const select = (id: string) => {
+    //     setSelectedId(id)
+    //     window.dispatchEvent(new CustomEvent('selectDecalById', { detail: { id } }))
+    // }
 
     const doCommand = (id: string, action: string, data?: any) => {
         window.dispatchEvent(new CustomEvent('decalCommand', { detail: { id, action, data } }))

@@ -14,6 +14,7 @@ export type AssetRef = { type: 'logo' | 'text'; index: number }
 export type DecalRec = {
     id: string
     mesh: THREE.Mesh
+    thumb?: string
     // size stored as decal width (world units). We won't use mesh.scale for visual size.
     sizeForDecal: number
     canvas: HTMLCanvasElement
@@ -21,6 +22,7 @@ export type DecalRec = {
     text?: string
     font?: string
     color?: string
+    size?: number
 
     // important surface attachment info:
     hitObject?: THREE.Object3D   // the mesh we projected onto
@@ -28,6 +30,7 @@ export type DecalRec = {
     normal?: THREE.Vector3      // world-space normal at hit point
     rotDeg?: number             // in-plane rotation (degrees) around normal
     fontSize?: number           // for text canvases (px)
+    rotationDeg?: number
 }
 
 export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, bgColor }: {
