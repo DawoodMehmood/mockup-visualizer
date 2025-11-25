@@ -78,8 +78,8 @@ export function useDecalDrag(params: {
             let finalQuat = new THREE.Quaternion().setFromRotationMatrix(matrix)
 
             // Apply saved in-plane rotation
-            if (rec.rotDeg !== undefined && rec.rotDeg !== 0) {
-                const rotRad = THREE.MathUtils.degToRad(rec.rotDeg)
+            if (rec.rotationDeg !== undefined && rec.rotationDeg !== 0) {
+                const rotRad = THREE.MathUtils.degToRad(rec.rotationDeg)
                 const qRot = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
                 finalQuat = finalQuat.multiply(qRot)
             }
@@ -154,14 +154,14 @@ export function useDecalDrag(params: {
                     let finalQuat = new THREE.Quaternion().setFromRotationMatrix(matrix)
 
                     // Apply saved in-plane rotation
-                    if (rec.rotDeg !== undefined && rec.rotDeg !== 0) {
-                        const rotRad = THREE.MathUtils.degToRad(rec.rotDeg)
+                    if (rec.rotationDeg !== undefined && rec.rotationDeg !== 0) {
+                        const rotRad = THREE.MathUtils.degToRad(rec.rotationDeg)
                         const qRot = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
                         finalQuat = finalQuat.multiply(qRot)
                     }
 
                     // Now compute baseLocalRotation relative to hitObject
-                    const qRotInv = new THREE.Quaternion().setFromAxisAngle(normalWorld, -THREE.MathUtils.degToRad(rec.rotDeg ?? 0))
+                    const qRotInv = new THREE.Quaternion().setFromAxisAngle(normalWorld, -THREE.MathUtils.degToRad(rec.rotationDeg ?? 0))
                     const baseWorldQuat = finalQuat.clone().multiply(qRotInv)
 
                     const objWorldQuat = new THREE.Quaternion()

@@ -18,7 +18,8 @@ export function useDecals(params: {
         canvas: HTMLCanvasElement,
         width: number,
         rotationDeg: number,
-        camera?: THREE.Camera
+        camera?: THREE.Camera,
+        baseLocalRotation?: THREE.Quaternion
     ) => {
         mesh: THREE.Mesh<DecalGeometry, THREE.MeshBasicMaterial, THREE.Object3DEventMap>;
         mat: THREE.MeshBasicMaterial;
@@ -105,7 +106,7 @@ export function useDecals(params: {
                     decalsGroupRef.current?.remove(rec.mesh)
 
                     // create new decal geometry with same canvas and rotation
-                    const { mesh: newMesh } = createDecalMesh(hitObj as any, pos.clone(), normal.clone(), rec.canvas, newSize, rec.rotDeg ?? 0, undefined, rec.baseLocalRotation)
+                    const { mesh: newMesh } = createDecalMesh(hitObj as any, pos.clone(), normal.clone(), rec.canvas, newSize, rec.rotationDeg ?? 0, undefined, rec.baseLocalRotation)
                     decalsGroupRef.current!.add(newMesh)
 
                     // update record
@@ -144,7 +145,7 @@ export function useDecals(params: {
                     }
 
                     // create new mesh using same world sizeForDecal and rotation
-                    const { mesh: newMesh2 } = createDecalMesh(hitObj2 as any, pos2.clone(), normal2.clone(), newCanvas, rec.sizeForDecal ?? 0.5, rec.rotDeg ?? 0, undefined, rec.baseLocalRotation)
+                    const { mesh: newMesh2 } = createDecalMesh(hitObj2 as any, pos2.clone(), normal2.clone(), newCanvas, rec.sizeForDecal ?? 0.5, rec.rotationDeg ?? 0, undefined, rec.baseLocalRotation)
                     decalsGroupRef.current!.add(newMesh2)
 
                     rec.mesh = newMesh2
@@ -180,7 +181,7 @@ export function useDecals(params: {
                     decalsGroupRef.current!.add(newMeshR)
 
                     rec.mesh = newMeshR
-                    rec.rotDeg = rotationDeg
+                    rec.rotationDeg = rotationDeg
                     setDecals(prev => prev.map(p => p.id === rec.id ? rec : p))
                     window.dispatchEvent(new CustomEvent('decalUpdated', { detail: { id: rec.id, rotationDeg } }))
                     break

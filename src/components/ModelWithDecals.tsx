@@ -28,7 +28,7 @@ export type DecalRec = {
     hitObject?: THREE.Object3D   // the mesh we projected onto
     position?: THREE.Vector3    // world-space decal center point
     normal?: THREE.Vector3      // world-space normal at hit point
-    rotDeg?: number             // in-plane rotation (degrees) around normal
+    rotationDeg?: number             // in-plane rotation (degrees) around normal
     fontSize?: number           // for text canvases (px)
     localPosition?: THREE.Vector3
     localNormal?: THREE.Vector3
@@ -280,7 +280,7 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
             localPosition: hit.object.worldToLocal(point.clone()),
             localNormal: normal.clone().transformDirection(hit.object.matrixWorld.clone().invert()).normalize(),
             baseLocalRotation,
-            rotDeg: 0,
+            rotationDeg: 0,
             fontSize: assetSelection.type === 'text' ? Math.max(32, Math.min(96, Math.floor(280 / Math.max(1, (texts[assetSelection.index] || '').length)))) : undefined,
         }
         setDecals(prev => [...prev, rec])
