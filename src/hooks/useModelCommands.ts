@@ -4,29 +4,32 @@ import * as THREE from 'three'
 
 
 export function useModelCommands(params: {
-    modelRef: RefObject<THREE.Group<THREE.Object3DEventMap> | null>
+    containerRef: RefObject<THREE.Group<THREE.Object3DEventMap> | null>
 }) {
-    const { modelRef } = params
+    const { containerRef } = params
 
     useEffect(() => {
         const handler = (ev: any) => {
             const { action, delta, axis, deg } = ev.detail || {}
-            if (!modelRef.current) return
-            const theModel = modelRef.current.children[0] as THREE.Object3D | undefined
-            if (!theModel) return
+            if (!containerRef.current) return
+            const container = containerRef.current
 
             if (action === 'zoom' && typeof delta === 'number') {
-                const current = theModel.scale.x
+                const current = container.scale.x
                 const newScale = THREE.MathUtils.clamp(current * delta, 0.2, 5)
-                theModel.scale.setScalar(newScale)
+                container.scale.setScalar(newScale)
             } else if (action === 'rotate' && axis && typeof deg === 'number') {
                 const rad = (deg * Math.PI) / 180
-                if (axis === 'y') theModel.rotateY(rad)
-                else if (axis === 'x') theModel.rotateX(rad)
-                else if (axis === 'z') theModel.rotateZ(rad)
+                if (axis === 'y') container.rotateY(rad)
+                else if (axis === 'x') container.rotateX(rad)
+                else if (axis === 'z') container.rotateZ(rad)
+            } else if (action === 'resetTransform') {
+                container.scale.set(1, 1, 1)
+                container.rotation.set(0, 0, 0)
+                container.position.set(0, 0, 0)
             }
         }
         window.addEventListener('modelCommand', handler)
         return () => window.removeEventListener('modelCommand', handler)
-    }, [modelRef])
+    }, [containerRef])
 }

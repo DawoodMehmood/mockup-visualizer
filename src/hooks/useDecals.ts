@@ -87,8 +87,15 @@ export function useDecals(params: {
                     const newSize = Number(data?.size ?? rec.sizeForDecal ?? 0.5)
                     // recreate decal geometry at saved hit point
                     const hitObj = rec.hitObject ?? rec.mesh // fallback
-                    const pos = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
-                    const normal = rec.normal ?? new THREE.Vector3(0, 0, 1)
+                    let pos = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
+                    let normal = rec.normal ?? new THREE.Vector3(0, 0, 1)
+
+                    if (rec.localPosition && rec.hitObject) {
+                        pos = rec.localPosition.clone().applyMatrix4(rec.hitObject.matrixWorld)
+                    }
+                    if (rec.localNormal && rec.hitObject) {
+                        normal = rec.localNormal.clone().transformDirection(rec.hitObject.matrixWorld).normalize()
+                    }
 
                     // keep same canvas texture (we may need to recreate canvas for text separately)
                     // remove old mesh safely
@@ -98,7 +105,7 @@ export function useDecals(params: {
                     decalsGroupRef.current?.remove(rec.mesh)
 
                     // create new decal geometry with same canvas and rotation
-                    const { mesh: newMesh } = createDecalMesh(hitObj as any, pos.clone(), normal.clone(), rec.canvas, newSize, rec.rotDeg ?? 0)
+                    const { mesh: newMesh } = createDecalMesh(hitObj as any, pos.clone(), normal.clone(), rec.canvas, newSize, rec.rotDeg ?? 0, undefined, rec.baseLocalRotation)
                     decalsGroupRef.current!.add(newMesh)
 
                     // update record
@@ -126,11 +133,18 @@ export function useDecals(params: {
                     decalsGroupRef.current?.remove(rec.mesh)
 
                     const hitObj2 = rec.hitObject ?? rec.mesh
-                    const pos2 = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
-                    const normal2 = rec.normal ?? new THREE.Vector3(0, 0, 1)
+                    let pos2 = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
+                    let normal2 = rec.normal ?? new THREE.Vector3(0, 0, 1)
+
+                    if (rec.localPosition && rec.hitObject) {
+                        pos2 = rec.localPosition.clone().applyMatrix4(rec.hitObject.matrixWorld)
+                    }
+                    if (rec.localNormal && rec.hitObject) {
+                        normal2 = rec.localNormal.clone().transformDirection(rec.hitObject.matrixWorld).normalize()
+                    }
 
                     // create new mesh using same world sizeForDecal and rotation
-                    const { mesh: newMesh2 } = createDecalMesh(hitObj2 as any, pos2.clone(), normal2.clone(), newCanvas, rec.sizeForDecal ?? 0.5, rec.rotDeg ?? 0)
+                    const { mesh: newMesh2 } = createDecalMesh(hitObj2 as any, pos2.clone(), normal2.clone(), newCanvas, rec.sizeForDecal ?? 0.5, rec.rotDeg ?? 0, undefined, rec.baseLocalRotation)
                     decalsGroupRef.current!.add(newMesh2)
 
                     rec.mesh = newMesh2
@@ -145,8 +159,15 @@ export function useDecals(params: {
                     const rotationDeg = Number(data?.rotationDeg ?? 0)
                     // recreate geometry rotated in-plane around the normal
                     const hitObjR = rec.hitObject ?? rec.mesh
-                    const posR = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
-                    const normalR = rec.normal ?? new THREE.Vector3(0, 0, 1)
+                    let posR = rec.position ?? rec.mesh.getWorldPosition(new THREE.Vector3())
+                    let normalR = rec.normal ?? new THREE.Vector3(0, 0, 1)
+
+                    if (rec.localPosition && rec.hitObject) {
+                        posR = rec.localPosition.clone().applyMatrix4(rec.hitObject.matrixWorld)
+                    }
+                    if (rec.localNormal && rec.hitObject) {
+                        normalR = rec.localNormal.clone().transformDirection(rec.hitObject.matrixWorld).normalize()
+                    }
 
                     // remove old
                     rec.mesh.geometry.dispose()
@@ -155,7 +176,7 @@ export function useDecals(params: {
                     decalsGroupRef.current?.remove(rec.mesh)
 
                     // create new geometry with rotationDeg applied
-                    const { mesh: newMeshR } = createDecalMesh(hitObjR as any, posR.clone(), normalR.clone(), rec.canvas, rec.sizeForDecal ?? 0.5, rotationDeg)
+                    const { mesh: newMeshR } = createDecalMesh(hitObjR as any, posR.clone(), normalR.clone(), rec.canvas, rec.sizeForDecal ?? 0.5, rotationDeg, undefined, rec.baseLocalRotation)
                     decalsGroupRef.current!.add(newMeshR)
 
                     rec.mesh = newMeshR

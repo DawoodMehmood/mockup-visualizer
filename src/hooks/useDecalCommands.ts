@@ -48,7 +48,7 @@ export function useDecalCommands(params: {
             } else if (e.type === 'exportGLB') {
                 const exporter = new GLTFExporter()
                 const exportScene = scene.clone(true)
-                if (decalsGroupRef.current) exportScene.add(decalsGroupRef.current.clone(true))
+
                 exporter.parse(
                     exportScene,
                     (result) => {

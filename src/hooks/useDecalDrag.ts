@@ -21,10 +21,8 @@ export function useDecalDrag(params: {
         let activeDragId: string | null = null
         let pointerIdHeld: number | null = null
         let latestXY: { x: number; y: number } | null = null
-        let scheduled = false
 
         const processLatest = () => {
-            scheduled = false
             if (!activeDragId || !latestXY || !modelRef.current) return
 
             const rect = gl.domElement.getBoundingClientRect()
@@ -103,6 +101,13 @@ export function useDecalDrag(params: {
                 new THREE.Vector3(width * padding, width * padding, depth * depthPadding)
             )
 
+            // Fix for rotating container: transform geometry to container's local space
+            if (decalsGroupRef.current && decalsGroupRef.current.parent) {
+                const container = decalsGroupRef.current.parent
+                const inverseMatrix = container.matrixWorld.clone().invert()
+                newGeo.applyMatrix4(inverseMatrix)
+            }
+
             if (rec.mesh.geometry) rec.mesh.geometry.dispose()
             rec.mesh.geometry = newGeo
 
@@ -110,6 +115,8 @@ export function useDecalDrag(params: {
             rec.hitObject = hit.object
             rec.position = placementPoint.clone()
             rec.normal = normalWorld.clone()
+            rec.localPosition = hit.object.worldToLocal(placementPoint.clone())
+            rec.localNormal = normalWorld.clone().transformDirection(hit.object.matrixWorld.clone().invert()).normalize()
 
             // Trigger update only if moved significantly
             const prevPos = rec.position
@@ -125,21 +132,54 @@ export function useDecalDrag(params: {
             if (!activeDragId) return
             ev.preventDefault()
             latestXY = { x: ev.clientX, y: ev.clientY }
-            if (!scheduled) {
-                scheduled = true
-                requestAnimationFrame(processLatest)
-            }
+            processLatest()
         }
 
         const onPointerUp = (ev: PointerEvent) => {
-            if (activeDragId) ev.stopPropagation()
+            if (activeDragId) {
+                ev.stopPropagation()
+                // Update baseLocalRotation for the dragged decal so future rotations work correctly
+                const rec = decals.find(d => d.id === activeDragId)
+                if (rec && rec.hitObject && rec.mesh) {
+                    const normalWorld = rec.normal!.clone().normalize()
+                    const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
+                    let tangent = new THREE.Vector3().crossVectors(camUp, normalWorld).normalize()
+                    if (tangent.lengthSq() < 0.01) {
+                        const camDir = camera.getWorldDirection(new THREE.Vector3())
+                        tangent = new THREE.Vector3().crossVectors(camDir, normalWorld).normalize()
+                    }
+                    const bitangent = new THREE.Vector3().crossVectors(normalWorld, tangent).normalize()
+                    const matrix = new THREE.Matrix4()
+                    matrix.makeBasis(tangent, bitangent, normalWorld)
+                    let finalQuat = new THREE.Quaternion().setFromRotationMatrix(matrix)
+
+                    // Apply saved in-plane rotation
+                    if (rec.rotDeg !== undefined && rec.rotDeg !== 0) {
+                        const rotRad = THREE.MathUtils.degToRad(rec.rotDeg)
+                        const qRot = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
+                        finalQuat = finalQuat.multiply(qRot)
+                    }
+
+                    // Now compute baseLocalRotation relative to hitObject
+                    const qRotInv = new THREE.Quaternion().setFromAxisAngle(normalWorld, -THREE.MathUtils.degToRad(rec.rotDeg ?? 0))
+                    const baseWorldQuat = finalQuat.clone().multiply(qRotInv)
+
+                    const objWorldQuat = new THREE.Quaternion()
+                    rec.hitObject.getWorldQuaternion(objWorldQuat)
+
+                    const baseLocalRotation = objWorldQuat.clone().invert().multiply(baseWorldQuat)
+
+                    // Update record
+                    rec.baseLocalRotation = baseLocalRotation
+                    setDecals(prev => prev.map(p => p.id === rec.id ? { ...rec } : p))
+                }
+            }
             if (pointerIdHeld !== null && ev.pointerId === pointerIdHeld) {
                 try { gl.domElement.releasePointerCapture(pointerIdHeld) } catch { }
             }
             activeDragId = null
             pointerIdHeld = null
             latestXY = null
-            scheduled = false
             window.removeEventListener('pointermove', onPointerMove)
             window.removeEventListener('pointerup', onPointerUp)
             const controls = (gl as any).controls

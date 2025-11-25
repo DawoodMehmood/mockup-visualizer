@@ -30,7 +30,9 @@ export type DecalRec = {
     normal?: THREE.Vector3      // world-space normal at hit point
     rotDeg?: number             // in-plane rotation (degrees) around normal
     fontSize?: number           // for text canvases (px)
-    rotationDeg?: number
+    localPosition?: THREE.Vector3
+    localNormal?: THREE.Vector3
+    baseLocalRotation?: THREE.Quaternion // Orientation relative to hitObject at 0 degrees rotation
 }
 
 export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, bgColor }: {
@@ -126,40 +128,56 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         canvas: HTMLCanvasElement,
         width = 0.5,
         rotationDeg = 0,
-        camera?: THREE.Camera
+        camera?: THREE.Camera,
+        baseLocalRotation?: THREE.Quaternion
     ) => {
-        // Normalize the normal
-        const normalWorld = normal.clone().normalize()
+        let finalQuat: THREE.Quaternion
 
-        // Reference "up" = camera's up direction (world space)
-        const camUp = camera
-            ? new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
-            : new THREE.Vector3(0, 1, 0);
+        if (baseLocalRotation) {
+            // Stable rotation: reconstruct world orientation from local base + rotationDeg
+            const objWorldQuat = new THREE.Quaternion()
+            hitObject.getWorldQuaternion(objWorldQuat)
+            const baseWorldQuat = objWorldQuat.multiply(baseLocalRotation)
 
-        // Build tangent (right vector)
-        let tangent = new THREE.Vector3().crossVectors(camUp, normal).normalize();
-        if (tangent.lengthSq() < 0.01) {
-            // rare case: normal almost parallel to camera up → fall back to camera forward
-            const camDir = camera!.getWorldDirection(new THREE.Vector3());
-            tangent = new THREE.Vector3().crossVectors(camDir, normal).normalize();
+            // Rotate around the local Z axis (which is the surface normal)
+            const rotRad = (rotationDeg * Math.PI) / 180
+            const qRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rotRad)
+            finalQuat = baseWorldQuat.multiply(qRot)
+        } else {
+            // Normalize the normal
+            const normalWorld = normal.clone().normalize()
+
+            // Reference "up" = camera's up direction (world space)
+            const camUp = camera
+                ? new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize()
+                : new THREE.Vector3(0, 1, 0);
+
+            // Build tangent (right vector)
+            let tangent = new THREE.Vector3().crossVectors(camUp, normal).normalize();
+            if (tangent.lengthSq() < 0.01) {
+                // rare case: normal almost parallel to camera up → fall back to camera forward
+                const camDir = camera!.getWorldDirection(new THREE.Vector3());
+                tangent = new THREE.Vector3().crossVectors(camDir, normal).normalize();
+            }
+
+            // Recompute bitangent (surface up) to be exactly perpendicular
+            const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+
+            // Build orientation matrix
+            const matrix = new THREE.Matrix4();
+            matrix.makeBasis(tangent, bitangent, normal); // right, up, forward (normal)
+
+
+            const q = new THREE.Quaternion().setFromRotationMatrix(matrix)
+
+            // apply additional rotation around the normal (in-plane)
+            const rotRad = (rotationDeg * Math.PI) / 180
+            const qAroundNormal = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
+
+            // combined rotation: first align to normal, then rotate in-plane
+            finalQuat = q.clone().multiply(qAroundNormal)
         }
 
-        // Recompute bitangent (surface up) to be exactly perpendicular
-        const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
-
-        // Build orientation matrix
-        const matrix = new THREE.Matrix4();
-        matrix.makeBasis(tangent, bitangent, normal); // right, up, forward (normal)
-
-
-        const q = new THREE.Quaternion().setFromRotationMatrix(matrix)
-
-        // apply additional rotation around the normal (in-plane)
-        const rotRad = (rotationDeg * Math.PI) / 180
-        const qAroundNormal = new THREE.Quaternion().setFromAxisAngle(normalWorld, rotRad)
-
-        // combined rotation: first align to normal, then rotate in-plane
-        const finalQuat = q.clone().multiply(qAroundNormal)
         const euler = new THREE.Euler().setFromQuaternion(finalQuat, 'XYZ')
 
         // depth small; keep depth proportional to width (thin)
@@ -197,10 +215,17 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         })
 
         const mesh = new THREE.Mesh(decalGeo, mat)
+
+        // Transform geometry to container's local space so it moves with the container
+        if (containerRef.current) {
+            const inverseMatrix = containerRef.current.matrixWorld.clone().invert()
+            mesh.geometry.applyMatrix4(inverseMatrix)
+        }
+
         mesh.userData.selectable = true
         mesh.renderOrder = 999999
         mesh.frustumCulled = false
-        return { mesh, mat, tex, euler }
+        return { mesh, mat, tex, euler, finalQuat }
     }
 
 
@@ -228,7 +253,12 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         // DecalGeometry wants a mesh
         const targetMesh = hit.object as THREE.Mesh
 
-        const { mesh } = createDecalMesh(targetMesh, point, normal, canvas, size, 0, camera)
+        const { mesh, finalQuat } = createDecalMesh(targetMesh, point, normal, canvas, size, 0, camera)
+
+        // Compute baseLocalRotation (orientation relative to hitObject at 0 deg)
+        const objWorldQuat = new THREE.Quaternion()
+        targetMesh.getWorldQuaternion(objWorldQuat)
+        const baseLocalRotation = objWorldQuat.clone().invert().multiply(finalQuat)
 
         // after creating mesh and adding to decal group:
         decalsGroupRef.current!.add(mesh)
@@ -247,6 +277,9 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
             hitObject: hit.object,
             position: point.clone(),
             normal: normal.clone(),
+            localPosition: hit.object.worldToLocal(point.clone()),
+            localNormal: normal.clone().transformDirection(hit.object.matrixWorld.clone().invert()).normalize(),
+            baseLocalRotation,
             rotDeg: 0,
             fontSize: assetSelection.type === 'text' ? Math.max(32, Math.min(96, Math.floor(280 / Math.max(1, (texts[assetSelection.index] || '').length)))) : undefined,
         }
@@ -294,8 +327,8 @@ export default function ModelWithDecals({ glbUrl, logos, texts, assetSelection, 
         createDecalMesh
     })
 
-    // Model commands: zoom / rotate applied only to the loaded model (modelRef.children[0])
-    useModelCommands({ modelRef })
+    // Model commands: zoom / rotate applied to the container (so decals move with model)
+    useModelCommands({ containerRef })
 
     // direct drag: pointerdown on a decal initiates drag (move along model surface)
     useDecalDrag({
